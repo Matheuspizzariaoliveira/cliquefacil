@@ -22,3 +22,8 @@
 @keyframes liveToastIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
 .notification-toggle{padding:8px 10px;font-size:12px}
 @media(max-width:600px){.top-actions{gap:5px}.notification-toggle{padding:8px;font-size:11px}.live-notices{right:15px;bottom:15px}}
+
+
+/* Seleção de horários disponíveis */
+.booking-form select:disabled{background:#f4f5f8;color:#777d8d;cursor:not-allowed;opacity:1}
+.booking-form select[name="time"]{font-variant-numeric:tabular-nums}
