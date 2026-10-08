@@ -8,10 +8,22 @@ const slugify=s=>String(s||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").t
 
 async function start(){
  if(!FB().ready){renderSetupError();return;}
+ const requested=new URLSearchParams(location.search).get("site");
+ if(requested){
+  try{
+   const c=await loadPublicSite(requested);
+   if(c)renderPublic(c);
+   else document.querySelector("#app").innerHTML=`<div class="auth-page"><div class="auth-card"><h1>Página não encontrada</h1><p class="muted">Esse link não existe ou a página está inativa.</p></div></div>`;
+  }catch(error){
+   console.error(error);
+   document.querySelector("#app").innerHTML=`<div class="auth-page"><div class="auth-card"><h1>Não foi possível abrir a página</h1><p class="muted">Verifique as regras e os índices do Firestore.</p></div></div>`;
+  }
+  return;
+ }
  FB().auth.onAuthStateChanged(async user=>{
   currentUser=user||null;
   if(!user){renderLogin();return;}
-  try{await loadData();if(!openRequestedSite())dashboard();}
+  try{await loadData();dashboard();}
   catch(error){console.error(error);alert("Não foi possível carregar os dados do Firebase. Verifique as regras do Firestore.");dashboard();}
  });
 }
