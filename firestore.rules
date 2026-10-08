@@ -1,0 +1,39 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function ownsClient(clientId) {
+      return signedIn()
+        && get(/databases/$(database)/documents/clients/$(clientId)).data.ownerId == request.auth.uid;
+    }
+
+    match /clients/{clientId} {
+      // Public pages can read only active clients.
+      allow read: if resource.data.active == true || (signedIn() && resource.data.ownerId == request.auth.uid);
+      allow create: if signedIn() && request.resource.data.ownerId == request.auth.uid;
+      allow update, delete: if signedIn() && resource.data.ownerId == request.auth.uid
+        && request.resource.data.ownerId == request.auth.uid;
+
+      match /items/{itemId} {
+        allow read: if get(/databases/$(database)/documents/clients/$(clientId)).data.active == true
+          || ownsClient(clientId);
+        allow create, update, delete: if ownsClient(clientId);
+      }
+
+      match /orders/{orderId} {
+        allow create: if get(/databases/$(database)/documents/clients/$(clientId)).data.active == true;
+        allow read, update, delete: if ownsClient(clientId);
+      }
+
+      match /appointments/{appointmentId} {
+        allow create: if get(/databases/$(database)/documents/clients/$(clientId)).data.active == true;
+        allow read, update, delete: if ownsClient(clientId);
+      }
+    }
+  }
+}
