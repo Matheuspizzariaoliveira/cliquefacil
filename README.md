@@ -1,22 +1,36 @@
 # CliqueFácil
 
-Base inicial de uma plataforma para criar e gerenciar páginas digitais para vários clientes.
+Base de uma plataforma para criar e gerenciar páginas digitais para vários clientes usando modelos reutilizáveis.
 
-## O que já existe
-- Painel de visão geral
-- Cadastro de clientes
-- Criação e edição de páginas
-- Modelos para pizzaria, barbearia, salão, estética, loja e autônomo
-- Página pública configurável
-- Dados separados por cliente
+## Já implementado
+
+- Painel administrativo
+- Cadastro e edição de clientes
+- 6 segmentos iniciais: pizzaria/restaurante, barbearia, salão, estética/manicure, loja e autônomo
+- Slug individual por cliente
+- Catálogo separado por cliente
+- Cadastro, edição e exclusão de produtos/serviços
+- Página pública individual por cliente usando `?site=slug`
+- Botão de WhatsApp na página pública
 - Layout responsivo
 
-## Arquitetura planejada
-Uma aplicação única com modelos reutilizáveis e configurações individuais por cliente.
+## Próxima etapa
 
-O protótipo atual usa localStorage para demonstrar o fluxo. Para produção, a próxima etapa é conectar autenticação e banco de dados, além de catálogo, pedidos, agendamentos, usuários e URLs individuais.
+Conectar o projeto ao Firebase para substituir o localStorage por autenticação e Firestore, permitindo que os dados fiquem persistentes e separados por cliente em produção.
 
-## Arquivos
-- index.html
-- styles.css
-- app.js
+## Arquitetura de dados planejada
+
+- `clients`
+- `clients/{clientId}/items`
+- `clients/{clientId}/orders`
+- `clients/{clientId}/appointments`
+
+O protótipo continua usando localStorage enquanto a configuração do Firebase não é inserida.
+
+## Arquivos principais
+
+- `index.html`
+- `styles.css`
+- `app.js`
+- `firebase-config.js`
+- `data-model.md`
