@@ -147,7 +147,7 @@ function renderPublic(c){
   return `<article class="item"><div class="item-public-info">${x.category?`<span class="category-chip">${esc(x.category)}</span>`:""}<strong>${esc(x.name)}</strong>${x.description?`<small>${esc(x.description)}</small>`:""}<span class="item-public-price">${x.price?"R$ "+esc(x.price):"Preço sob consulta"}</span></div>${wa?`<a class="btn secondary item-order" href="https://wa.me/${wa}?text=${message}" target="_blank" rel="noopener" onclick="registerPublicOrder('${c.id}','${x.id}')">${isShop?"Pedir":"Consultar"}</a>`:""}</article>`;
  }).join(""):`<div class="empty-inline">Nenhum item disponível no momento.</div>`;
  const back=currentUser?`<button class="btn public-back" onclick="dashboard()">← Painel</button>`:"";
- const booking=!isShop?`<section class="card appointment-card"><h2>Solicitar agendamento</h2><p class="muted">Preencha os dados para enviar sua solicitação.</p><form class="booking-form" onsubmit="submitPublicAppointment(event,'${c.id}')"><label>Seu nome<input name="customerName" required maxlength="100" placeholder="Nome completo"></label><label>Serviço<select name="service" required><option value="">Selecione um serviço</option>${list.map(x=>`<option value="${esc(x.name)}">${esc(x.name)}</option>`).join("")}</select></label><div class="booking-row"><label>Data<input type="date" name="date" required min="${new Date().toLocaleDateString("en-CA")}"></label><label>Horário<input type="time" name="time" required></label></div><label>Seu WhatsApp<input name="customerPhone" required maxlength="30" placeholder="DDD + número"></label><label>Observações (opcional)<textarea name="notes" maxlength="500" placeholder="Alguma preferência?"></textarea></label><button class="btn primary" type="submit">Solicitar agendamento</button><p class="booking-feedback" aria-live="polite"></p></form></section>`:"";
+ const booking=!isShop?`<section class="card appointment-card"><h2>Solicitar agendamento</h2><p class="muted">Preencha os dados para enviar sua solicitação.</p><form class="booking-form" data-hours="${esc(c.hours||"")}" onsubmit="submitPublicAppointment(event,'${c.id}')"><label>Seu nome<input name="customerName" required maxlength="100" placeholder="Nome completo"></label><label>Serviço<select name="service" required><option value="">Selecione um serviço</option>${list.map(x=>`<option value="${esc(x.name)}">${esc(x.name)}</option>`).join("")}</select></label><div class="booking-row"><label>Data<input type="date" name="date" required min="2026-10-08" onchange="loadAvailableTimes(event,'\${c.id}')"></label><label>Horário disponível<select name="time" required disabled><option value="">Escolha primeiro a data</option></select></label></div><label>Seu WhatsApp<input name="customerPhone" required maxlength="30" placeholder="DDD + número"></label><label>Observações (opcional)<textarea name="notes" maxlength="500" placeholder="Alguma preferência?"></textarea></label><button class="btn primary" type="submit">Solicitar agendamento</button><p class="booking-feedback" aria-live="polite"></p></form></section>`:"";
  document.querySelector("#app").innerHTML=`<div class="public public-${esc(c.layout||"moderno")}"><header class="public-head">${back}<div class="public-icon">${templates.find(t=>t.id===c.template)?.icon||"⭐"}</div><h1>${esc(c.name)}</h1>${c.description?`<p>${esc(c.description)}</p>`:""}${c.welcomeText?`<p class="welcome-text">${esc(c.welcomeText)}</p>`:""}</header><main class="public-content"><div class="card"><h2>Informações</h2><p>📍 ${esc(c.address||"Endereço não informado")}</p><p>🕒 ${esc(c.hours||"Horário não informado")}</p>${c.phone?`<p>📱 ${esc(c.phone)}</p>`:""}${c.instagram?`<p>📸 ${esc(c.instagram)}</p>`:""}</div><div class="card" style="margin-top:16px"><h2>${isShop?"Cardápio / Produtos":"Serviços"}</h2><div class="items">${content}</div>${wa?`<a class="btn primary public-cta" href="https://wa.me/${wa}" target="_blank" rel="noopener">${esc(c.buttonText||"Falar no WhatsApp")}</a>`:""}</div>${booking}<div class="public-link"><span>Link desta página</span><code>?site=${esc(c.slug)}</code>${currentUser?`<button class="btn ghost" onclick="copyLink('${c.id}')">Copiar</button>`:""}</div></main></div>`;
 }
 async function registerPublicOrder(clientId,itemId){
@@ -160,22 +160,78 @@ async function registerPublicOrder(clientId,itemId){
   });
  }catch(error){console.error("Não foi possível registrar o pedido:",error);}
 }
+function getBusinessTimeSlots(hoursText){
+ const matches=[...String(hoursText||"").matchAll(/\b([01]?\d|2[0-3])(?::([0-5]\d)|h([0-5]\d)?)?\b/gi)];
+ let start=9*60,end=18*60;
+ if(matches.length>=2){
+  const toMinutes=m=>Number(m[1])*60+Number(m[2]||m[3]||0);
+  const first=toMinutes(matches[0]),last=toMinutes(matches[1]);
+  if(last>first){start=first;end=last;}
+ }
+ const slots=[];
+ for(let minutes=start;minutes<end;minutes+=30){
+  const h=String(Math.floor(minutes/60)).padStart(2,"0");
+  const m=String(minutes%60).padStart(2,"0");
+  slots.push(h+":"+m);
+ }
+ return slots;
+}
+async function loadAvailableTimes(e,clientId){
+ const form=e.target.form,date=e.target.value,select=form.elements.time,feedback=form.querySelector(".booking-feedback");
+ select.disabled=true;
+ select.innerHTML='<option value="">Carregando horários...</option>';
+ if(!date){select.innerHTML='<option value="">Escolha primeiro a data</option>';return;}
+ try{
+  const snap=await FB().db.collection("clients").doc(clientId).collection("slots").where("date","==",date).get();
+  const booked=new Set(snap.docs.map(doc=>doc.data().time));
+  const slots=getBusinessTimeSlots(form.dataset.hours).filter(time=>!booked.has(time));
+  if(!slots.length){
+   select.innerHTML='<option value="">Não há horários disponíveis nesta data</option>';
+   if(feedback)feedback.textContent="Todos os horários desse dia estão ocupados. Escolha outra data.";
+   return;
+  }
+  select.innerHTML='<option value="">Selecione um horário</option>'+slots.map(time=>'<option value="'+time+'">'+time+'</option>').join("");
+  select.disabled=false;
+  if(feedback)feedback.textContent="";
+ }catch(error){
+  console.error("Não foi possível carregar os horários:",error);
+  select.innerHTML='<option value="">Indisponível no momento</option>';
+  if(feedback)feedback.textContent="Não foi possível consultar os horários. Verifique a configuração do Firestore ou tente novamente.";
+ }
+}
 async function submitPublicAppointment(e,clientId){
  e.preventDefault();
  const form=e.target,button=form.querySelector('button[type="submit"]'),feedback=form.querySelector(".booking-feedback");
  const data=Object.fromEntries(new FormData(form));
  if(data.date<new Date().toLocaleDateString("en-CA")){feedback.textContent="Escolha uma data de hoje ou futura.";return;}
- button.disabled=true;button.textContent="Enviando...";
+ if(!data.time){feedback.textContent="Selecione um horário disponível.";return;}
+ button.disabled=true;button.textContent="Reservando...";
  try{
-  await FB().db.collection("clients").doc(clientId).collection("appointments").add({
-   customerName:data.customerName.trim(),service:data.service,date:data.date,time:data.time,
-   customerPhone:data.customerPhone.trim(),notes:(data.notes||"").trim(),status:"novo",
-   createdAt:firebase.firestore.FieldValue.serverTimestamp()
+  const clientRef=FB().db.collection("clients").doc(clientId);
+  const slotId=data.date+"_"+data.time.replace(":","-");
+  const slotRef=clientRef.collection("slots").doc(slotId);
+  const appointmentRef=clientRef.collection("appointments").doc();
+  await FB().db.runTransaction(async transaction=>{
+   const slot=await transaction.get(slotRef);
+   if(slot.exists)throw new Error("SLOT_TAKEN");
+   transaction.set(slotRef,{date:data.date,time:data.time,createdAt:firebase.firestore.FieldValue.serverTimestamp()});
+   transaction.set(appointmentRef,{
+    customerName:data.customerName.trim(),service:data.service,date:data.date,time:data.time,
+    customerPhone:data.customerPhone.trim(),notes:(data.notes||"").trim(),status:"novo",
+    createdAt:firebase.firestore.FieldValue.serverTimestamp()
+   });
   });
-  feedback.textContent="Solicitação enviada! A empresa entrará em contato para confirmar.";
+  feedback.textContent="Horário reservado! A empresa entrará em contato para confirmar o atendimento.";
   form.reset();
- }catch(error){console.error(error);feedback.textContent="Não foi possível enviar. Tente novamente ou fale pelo WhatsApp.";}
- finally{button.disabled=false;button.textContent="Solicitar agendamento";}
+  form.elements.time.disabled=true;
+  form.elements.time.innerHTML='<option value="">Escolha primeiro a data</option>';
+ }catch(error){
+  console.error(error);
+  if(error.message==="SLOT_TAKEN"){
+   feedback.textContent="Esse horário acabou de ser reservado. Escolha outro horário.";
+   await loadAvailableTimes({target:form.elements.date},clientId);
+  }else feedback.textContent="Não foi possível reservar. Verifique as regras do Firestore ou fale pelo WhatsApp.";
+ }finally{button.disabled=false;button.textContent="Solicitar agendamento";}
 }
 function orderStatusLabel(status){return ({novo:"Novo",confirmado:"Confirmado",preparando:"Em andamento",concluido:"Concluído",cancelado:"Cancelado"})[status]||"Novo";}
 function appointmentStatusLabel(status){return ({novo:"Novo",confirmado:"Confirmado",concluido:"Concluído",cancelado:"Cancelado"})[status]||"Novo";}
@@ -193,8 +249,23 @@ function appointmentsView(){
 }
 function formatDate(timestamp){if(!timestamp?.toDate)return "—";return timestamp.toDate().toLocaleString("pt-BR",{dateStyle:"short",timeStyle:"short"});}
 async function updateRecordStatus(clientId,collection,id,status){
- try{await FB().db.collection("clients").doc(clientId).collection(collection).doc(id).update({status,updatedAt:firebase.firestore.FieldValue.serverTimestamp()});if(collection==="orders")orders[clientId]=(orders[clientId]||[]).map(x=>x.id===id?{...x,status}:x);else appointments[clientId]=(appointments[clientId]||[]).map(x=>x.id===id?{...x,status}:x);}
- catch(error){console.error(error);alert("Não foi possível atualizar o status. Verifique as regras do Firestore.");}
+ try{
+  const clientRef=FB().db.collection("clients").doc(clientId);
+  const recordRef=clientRef.collection(collection).doc(id);
+  const timestamp=firebase.firestore.FieldValue.serverTimestamp();
+  if(collection==="appointments"&&status==="cancelado"){
+   const record=(appointments[clientId]||[]).find(x=>x.id===id);
+   await FB().db.runTransaction(async transaction=>{
+    transaction.update(recordRef,{status,updatedAt:timestamp});
+    if(record?.date&&record?.time){
+     const slotRef=clientRef.collection("slots").doc(record.date+"_"+record.time.replace(":","-"));
+     transaction.delete(slotRef);
+    }
+   });
+  }else await recordRef.update({status,updatedAt:timestamp});
+  if(collection==="orders")orders[clientId]=(orders[clientId]||[]).map(x=>x.id===id?{...x,status}:x);
+  else appointments[clientId]=(appointments[clientId]||[]).map(x=>x.id===id?{...x,status}:x);
+ }catch(error){console.error(error);alert("Não foi possível atualizar o status. Verifique as regras do Firestore.");}
 }
 async function loadAndRefresh(){try{await loadData();if(view==="orders")ordersView();else appointmentsView();}catch(error){console.error(error);alert("Não foi possível atualizar os registros.");}}
 function copyLink(id){const c=clients.find(x=>x.id===id);if(c&&navigator.clipboard)navigator.clipboard.writeText(publicUrl(c)).then(()=>alert("Link copiado!"));}
