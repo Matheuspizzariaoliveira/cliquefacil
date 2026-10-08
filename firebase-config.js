@@ -1,6 +1,7 @@
-// Configuração do Firebase.
-// Substitua os valores pelos dados do seu projeto Firebase.
-export const firebaseConfig = {
+// Configuração do Firebase do CliqueFácil.
+// Cole aqui os dados do seu projeto Firebase.
+// Enquanto estes valores forem placeholders, o aplicativo continua funcionando em modo local.
+window.firebaseConfig = {
   apiKey: "COLE_SUA_API_KEY",
   authDomain: "SEU_PROJETO.firebaseapp.com",
   projectId: "SEU_PROJETO",
