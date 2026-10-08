@@ -1,5 +1,6 @@
 const templates=[{id:"pizzaria",icon:"🍕",name:"Pizzaria / Restaurante",desc:"Cardápio, pedidos e informações."},{id:"barbearia",icon:"💈",name:"Barbearia",desc:"Serviços e agendamento."},{id:"salao",icon:"💇",name:"Salão de beleza",desc:"Serviços, profissionais e horários."},{id:"estetica",icon:"💅",name:"Estética / Manicure",desc:"Catálogo de serviços e agenda."},{id:"loja",icon:"🛍️",name:"Loja",desc:"Produtos, contato e pedidos."},{id:"autonomo",icon:"🧑‍💼",name:"Profissional autônomo",desc:"Serviços e contato."}];
 let clients=[],items={},orders={},appointments={},view="dashboard",currentUser=null;
+let realtimeUnsubscribers=[],realtimeSeen={orders:{},appointments:{}},realtimeInitialized={orders:{},appointments:{}};
 const FB=()=>window.CliqueFacilFirebase||{};
 const esc=v=>String(v??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]));
 const tname=id=>templates.find(t=>t.id===id)?.name||"Serviço";
@@ -23,8 +24,9 @@ async function start(){
  }
  FB().auth.onAuthStateChanged(async user=>{
   currentUser=user||null;
-  if(!user){renderLogin();return;}
-  try{await loadData();dashboard();}
+  if(!user){stopRealtimeListeners();renderLogin();return;}
+  stopRealtimeListeners();
+  try{await loadData();dashboard();startRealtimeListeners();}
   catch(error){console.error(error);alert("Não foi possível carregar os dados do Firebase. Verifique as regras do Firestore.");dashboard();}
  });
 }
@@ -52,7 +54,74 @@ async function loadPublicSite(slug){
  const itemSnap=await FB().db.collection("clients").doc(c.id).collection("items").where("active","==",true).get();
  items[c.id]=itemSnap.docs.map(x=>({id:x.id,...x.data()}));return c;
 }
-function shell(content){const email=currentUser?.email||'Conta';document.querySelector('#app').innerHTML=`<header class="topbar"><div class="brand"><div class="brand-mark">C</div>Clique<span>Fácil</span></div><div class="top-actions"><div class="user-pill"><div class="avatar">${initials(email)}</div><span>${esc(email)}</span></div><button class="btn secondary" onclick="preview()">Visualizar</button><button class="btn primary" onclick="newClient()">+ Nova página</button><button class="btn ghost" onclick="logout()">Sair</button></div></header><div class="layout"><aside class="sidebar"><div class="side-label">Menu principal</div><nav class="nav"><button class="${view==="dashboard"?"active":""}" onclick="dashboard()"><span class="nav-icon">▦</span>Visão geral</button><button class="${view==="clients"?"active":""}" onclick="clientsView()"><span class="nav-icon">◉</span>Clientes</button><button class="${view==="templates"?"active":""}" onclick="templatesView()"><span class="nav-icon">◇</span>Modelos</button><button class="${view==="orders"?"active":""}" onclick="ordersView()"><span class="nav-icon">🧾</span>Pedidos</button><button class="${view==="appointments"?"active":""}" onclick="appointmentsView()"><span class="nav-icon">📅</span>Agendamentos</button><button onclick="newClient()"><span class="nav-icon">＋</span>Criar página</button></nav><div class="side-help"><strong>Pronto para crescer?</strong><p>Crie uma página para cada cliente e mantenha tudo organizado em um único painel.</p></div></aside><main class="main">${content}</main></div>`;}
+function shell(content){const email=currentUser?.email||'Conta';document.querySelector('#app').innerHTML=`<header class="topbar"><div class="brand"><div class="brand-mark">C</div>Clique<span>Fácil</span></div><div class="top-actions"><div class="user-pill"><div class="avatar">${initials(email)}</div><span>${esc(email)}</span></div><button class="btn secondary notification-toggle" onclick="enableNotifications()">🔔 Notificações</button><button class="btn secondary" onclick="preview()">Visualizar</button><button class="btn primary" onclick="newClient()">+ Nova página</button><button class="btn ghost" onclick="logout()">Sair</button></div></header><div class="layout"><aside class="sidebar"><div class="side-label">Menu principal</div><nav class="nav"><button class="${view==="dashboard"?"active":""}" onclick="dashboard()"><span class="nav-icon">▦</span>Visão geral</button><button class="${view==="clients"?"active":""}" onclick="clientsView()"><span class="nav-icon">◉</span>Clientes</button><button class="${view==="templates"?"active":""}" onclick="templatesView()"><span class="nav-icon">◇</span>Modelos</button><button class="${view==="orders"?"active":""}" onclick="ordersView()"><span class="nav-icon">🧾</span>Pedidos</button><button class="${view==="appointments"?"active":""}" onclick="appointmentsView()"><span class="nav-icon">📅</span>Agendamentos</button><button onclick="newClient()"><span class="nav-icon">＋</span>Criar página</button></nav><div class="side-help"><strong>Pronto para crescer?</strong><p>Crie uma página para cada cliente e mantenha tudo organizado em um único painel.</p></div></aside><main class="main">${content}</main></div>`;}
+function stopRealtimeListeners(){
+ realtimeUnsubscribers.forEach(unsubscribe=>{try{unsubscribe();}catch(error){console.warn(error);}});
+ realtimeUnsubscribers=[];
+ realtimeSeen={orders:{},appointments:{}};
+ realtimeInitialized={orders:{},appointments:{}};
+}
+function showLiveToast(title,message){
+ let host=document.getElementById("live-notices");
+ if(!host){host=document.createElement("div");host.id="live-notices";host.className="live-notices";host.setAttribute("aria-live","polite");document.body.appendChild(host);}
+ const toast=document.createElement("div");toast.className="live-toast";
+ const strong=document.createElement("strong");strong.textContent=title;
+ const body=document.createElement("span");body.textContent=message;
+ toast.append(strong,body);host.appendChild(toast);
+ window.setTimeout(()=>{toast.classList.add("leaving");window.setTimeout(()=>toast.remove(),250);},6000);
+}
+async function enableNotifications(){
+ if(!("Notification" in window)){showLiveToast("Notificações indisponíveis","Este navegador não oferece notificações do sistema.");return;}
+ try{
+  const permission=Notification.permission==="default"?await Notification.requestPermission():Notification.permission;
+  if(permission==="granted"){
+   showLiveToast("Notificações ativadas","Você receberá avisos enquanto o painel estiver aberto.");
+   const button=document.querySelector(".notification-toggle");if(button)button.textContent="🔔 Ativadas";
+  }else showLiveToast("Permissão não concedida","Permita notificações nas configurações do navegador para receber avisos.");
+ }catch(error){console.error(error);showLiveToast("Não foi possível ativar","Verifique as permissões do navegador.");}
+}
+function notifyNewRecord(kind,client,record){
+ const isOrder=kind==="orders";
+ const title=isOrder?"Novo pedido recebido":"Novo agendamento recebido";
+ const detail=isOrder?((record.itemName||"Pedido")+" — "+client.name):((record.customerName||"Cliente")+" — "+client.name);
+ showLiveToast(title,detail);
+ if("Notification" in window && Notification.permission==="granted"){
+  try{
+   const notification=new Notification(title,{body:detail,tag:kind+"-"+record.id});
+   notification.onclick=()=>{window.focus();if(isOrder)ordersView();else appointmentsView();notification.close();};
+  }catch(error){console.warn("Notificação do navegador indisponível:",error);}
+ }
+}
+function refreshLiveView(){
+ if(view==="dashboard")dashboard();
+ else if(view==="orders")ordersView();
+ else if(view==="appointments")appointmentsView();
+}
+function startRealtimeListeners(){
+ stopRealtimeListeners();
+ for(const client of clients){
+  for(const kind of ["orders","appointments"]){
+   const path=FB().db.collection("clients").doc(client.id).collection(kind);
+   const unsubscribe=path.onSnapshot(snapshot=>{
+    const previous=realtimeSeen[kind][client.id]||new Set();
+    const first=!realtimeInitialized[kind][client.id];
+    const records=snapshot.docs.map(doc=>({id:doc.id,...doc.data()}));
+    if(kind==="orders")orders[client.id]=records;else appointments[client.id]=records;
+    if(!first){
+     snapshot.docChanges().forEach(change=>{
+      if(change.type==="added"&&!previous.has(change.doc.id)){
+       notifyNewRecord(kind,client,{id:change.doc.id,...change.doc.data()});
+      }
+     });
+    }
+    realtimeSeen[kind][client.id]=new Set(records.map(record=>record.id));
+    realtimeInitialized[kind][client.id]=true;
+    refreshLiveView();
+   },error=>console.error("CliqueFácil: erro na atualização em tempo real ("+kind+"):",error));
+   realtimeUnsubscribers.push(unsubscribe);
+  }
+ }
+}
 async function logout(){await FB().auth.signOut();}
 function dashboard(){view='dashboard';const active=clients.filter(c=>c.active).length,totalItems=Object.values(items).reduce((n,a)=>n+a.length,0),totalOrders=Object.values(orders).reduce((n,a)=>n+a.length,0),totalAppointments=Object.values(appointments).reduce((n,a)=>n+a.length,0);const recent=clients.slice(0,5);const recentHtml=recent.length?recent.map(c=>`<div class="client-row"><div class="client-main"><div class="client-avatar">${esc(initials(c.name))}</div><div><strong>${esc(c.name)}</strong><div class="small-muted">${esc(tname(c.template))} · ${clientItems(c.id).length} item(ns)</div></div></div><div class="client-actions"><span class="badge ${c.active?'on':'off'}"><i class="dot"></i>${c.active?'Ativa':'Inativa'}</span><button class="btn ghost" onclick="editClient('${c.id}')">Editar</button></div></div>`).join(''): `<div class="empty"><div class="empty-icon">＋</div><h3>Nenhuma página ainda</h3><p class="muted">Comece criando a primeira página do seu cliente.</p><button class="btn primary" onclick="newClient()">Criar primeira página</button></div>`;shell(`<section class="hero"><div><div class="eyebrow">Painel de controle</div><h1>Visão geral</h1><div class="muted">Gerencie sua operação digital de forma simples e profissional.</div></div><button class="btn primary" onclick="newClient()">+ Criar nova página</button></section><section class="cards"><div class="card stat-card"><div class="stat-icon">👥</div><div class="stat-label">Clientes</div><div class="stat">${clients.length}</div><div class="stat-sub">cadastros no painel</div></div><div class="card stat-card"><div class="stat-icon">✓</div><div class="stat-label">Páginas ativas</div><div class="stat">${active}</div><div class="stat-sub">${clients.length?Math.round(active/clients.length*100):0}% dos clientes</div></div><div class="card stat-card"><div class="stat-icon">◇</div><div class="stat-label">Modelos</div><div class="stat">${templates.length}</div><div class="stat-sub">segmentos disponíveis</div></div><div class="card stat-card"><div class="stat-icon">▤</div><div class="stat-label">Itens</div><div class="stat">${totalItems}</div><div class="stat-sub">produtos e serviços</div></div><div class="card stat-card"><div class="stat-icon">🧾</div><div class="stat-label">Pedidos</div><div class="stat">${totalOrders}</div><div class="stat-sub">solicitações registradas</div></div><div class="card stat-card"><div class="stat-icon">📅</div><div class="stat-label">Agendamentos</div><div class="stat">${totalAppointments}</div><div class="stat-sub">solicitações recebidas</div></div></section><div class="dashboard-grid"><section class="section-card"><div class="section-head"><h2>Páginas recentes</h2><button class="btn ghost" onclick="clientsView()">Ver todas</button></div><div class="section-body">${recentHtml}</div></section><section class="section-card"><div class="section-head"><h2>Ações rápidas</h2></div><div class="section-body"><div class="quick-grid"><button class="quick-card" onclick="newClient()"><div class="quick-icon">＋</div><div><strong>Criar página</strong><span>Comece um novo cliente</span></div></button><button class="quick-card" onclick="templatesView()"><div class="quick-icon">◇</div><div><strong>Explorar modelos</strong><span>Escolha um segmento</span></div></button><button class="quick-card" onclick="clientsView()"><div class="quick-icon">◉</div><div><strong>Gerenciar clientes</strong><span>Editar e visualizar páginas</span></div></button></div></div></section></div>`);}
 function clientsView(){view="clients";const rows=clients.map(c=>`<tr><td><strong>${esc(c.name)}</strong><div class="small-muted">/${esc(c.slug||"")}</div></td><td>${tname(c.template)}</td><td><span class="badge ${c.active?"on":"off"}">${c.active?"Ativa":"Inativa"}</span></td><td>${clientItems(c.id).length}</td><td><button class="btn ghost" onclick="editClient('${c.id}')">Editar</button> <button class="btn secondary" onclick="manageItems('${c.id}')">Catálogo</button> <button class="btn primary" onclick="publicPage('${c.id}')">Abrir</button></td></tr>`).join("");shell(`<section class="hero"><div><h1>Clientes</h1><div class="muted">Cada cliente possui página, slug e catálogo próprios.</div></div><button class="btn primary" onclick="newClient()">+ Nova página</button></section>${clients.length?`<div class="table-wrap"><table class="table"><thead><tr><th>Cliente</th><th>Segmento</th><th>Status</th><th>Itens</th><th>Ações</th></tr></thead><tbody>${rows}</tbody></table></div>`:`<div class="card empty">Nenhum cliente cadastrado.</div>`}`);}
