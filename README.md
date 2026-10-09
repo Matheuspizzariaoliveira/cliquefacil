@@ -83,16 +83,3 @@ service firebase.storage {
 ```
 
 O primeiro cadastro cria a página; para enviar imagens de uma nova página, salve-a e depois entre em Editar página. As imagens são armazenadas no bucket, não dentro do documento do Firestore.
-
-
-## Upload de fotos pelo Cloudinary
-
-O CliqueFácil usa o Cloudinary para permitir que o dono da página envie logo, capa e fotos do catálogo pelo celular. O arquivo é enviado diretamente para o Cloudinary e a URL segura é salva no Firestore. O Firebase Storage não é necessário para essa função.
-
-1. Crie uma conta no Cloudinary e encontre o **Cloud name** no Dashboard.
-2. Abra **Settings → Upload → Upload presets** e crie um preset novo com **Signing Mode: Unsigned**.
-3. Nas configurações do preset, restrinja o tipo de arquivo a imagens e defina limite de tamanho. O aplicativo também limita cada arquivo a 5 MB.
-4. Coloque o Cloud name e o nome do preset no arquivo `cloudinary-config.js`.
-5. Nunca coloque o API Secret no site. Presets unsigned podem ser usados por qualquer pessoa que conheça seu nome, então use limites no preset e monitore o uso. Para um SaaS comercial com controle por cliente, recomendamos no futuro uploads assinados via backend.
-
-O plano e os limites atuais do Cloudinary podem mudar; confira os limites exibidos na sua conta antes de publicar para clientes.
