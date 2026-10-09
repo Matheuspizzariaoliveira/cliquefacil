@@ -7,7 +7,8 @@
     if(!firebase.apps.length)firebase.initializeApp(c);
     const auth=firebase.auth();
     const db=firebase.firestore();
-    window.CliqueFacilFirebase={ready:true,auth,db};
+    const storage=firebase.storage();
+    window.CliqueFacilFirebase={ready:true,auth,db,storage};
     console.info("CliqueFácil: Firebase conectado.");
   }catch(error){console.error("CliqueFácil: erro ao inicializar Firebase.",error);}
 })();
