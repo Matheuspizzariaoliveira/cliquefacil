@@ -60,3 +60,26 @@ match /slots/{slotId} {
 \`\`\`
 
 Publique as regras no Console do Firebase antes de testar os horários. Sem essa regra adicional, a consulta de disponibilidade e a reserva não funcionarão.
+
+
+## Fotos personalizadas (Firebase Storage)
+
+O editor de cada página permite enviar logo e foto de capa diretamente do celular. O upload usa Firebase Storage; confirme se o Storage está habilitado no projeto Firebase e publique estas regras na seção Storage > Rules. Se o console exigir mudança de plano para habilitar o bucket, confira as condições de cobrança antes de aceitar.
+
+```text
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /clients/{clientId}/{fileName} {
+      allow read: if firestore.get(/databases/(default)/documents/clients/$(clientId)).data.active == true
+        || (request.auth != null && firestore.get(/databases/(default)/documents/clients/$(clientId)).data.ownerId == request.auth.uid);
+      allow write: if request.auth != null
+        && firestore.get(/databases/(default)/documents/clients/$(clientId)).data.ownerId == request.auth.uid
+        && request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+  }
+}
+```
+
+O primeiro cadastro cria a página; para enviar imagens de uma nova página, salve-a e depois entre em Editar página. As imagens são armazenadas no bucket, não dentro do documento do Firestore.
