@@ -64,13 +64,13 @@ Publique as regras no Console do Firebase antes de testar os horários. Sem essa
 
 ## Fotos personalizadas (Firebase Storage)
 
-O editor de cada página permite enviar logo e foto de capa diretamente do celular. O upload usa Firebase Storage; confirme se o Storage está habilitado no projeto Firebase e publique estas regras na seção Storage > Rules. Se o console exigir mudança de plano para habilitar o bucket, confira as condições de cobrança antes de aceitar.
+O editor de cada página permite enviar logo e foto de capa diretamente do celular, e cada produto/serviço pode ter sua própria foto. O upload usa Firebase Storage; confirme se o Storage está habilitado no projeto Firebase e publique estas regras na seção Storage > Rules. Se o console exigir mudança de plano para habilitar o bucket, confira as condições de cobrança antes de aceitar.
 
 ```text
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
-    match /clients/{clientId}/{fileName} {
+    match /clients/{clientId}/{allPaths=**} {
       allow read: if firestore.get(/databases/(default)/documents/clients/$(clientId)).data.active == true
         || (request.auth != null && firestore.get(/databases/(default)/documents/clients/$(clientId)).data.ownerId == request.auth.uid);
       allow write: if request.auth != null
