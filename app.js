@@ -2,19 +2,6 @@ const templates=[{id:"pizzaria",icon:"🍕",name:"Pizzaria / Restaurante",desc:"
 let clients=[],items={},orders={},appointments={},view="dashboard",currentUser=null;
 let realtimeUnsubscribers=[],realtimeSeen={orders:{},appointments:{}},realtimeInitialized={orders:{},appointments:{}};
 const FB=()=>window.CliqueFacilFirebase||{};
-async function uploadImageToCloudinary(file,folder){
- if(!file)return null;
- if(!file.type.startsWith("image/"))throw new Error("Escolha um arquivo de imagem.");
- if(file.size>5*1024*1024)throw new Error("Cada imagem deve ter no máximo 5 MB.");
- const cfg=window.CliqueFacilCloudinary||{};
- if(!cfg.cloudName||!cfg.uploadPreset)throw new Error("Falta configurar o Cloudinary. Crie a conta e o preset de upload e informe o cloud name e o nome do preset.");
- const body=new FormData();body.append("file",file);body.append("upload_preset",cfg.uploadPreset);body.append("folder","cliquefacil/"+folder);
- const response=await fetch("https://api.cloudinary.com/v1_1/"+encodeURIComponent(cfg.cloudName)+"/image/upload",{method:"POST",body});
- const result=await response.json();
- if(!response.ok)throw new Error(result?.error?.message||"O Cloudinary não conseguiu enviar a imagem.");
- return result.secure_url;
-}
-
 const esc=v=>String(v??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]));
 const tname=id=>templates.find(t=>t.id===id)?.name||"Serviço";
 const clientItems=id=>items[id]||[];
@@ -194,12 +181,20 @@ async function submitClient(e,id){
   let clientId=id;
   if(id){await FB().db.collection("clients").doc(id).update(data);}
   else{data.ownerId=currentUser.uid;data.createdAt=firebase.firestore.FieldValue.serverTimestamp();const ref=await FB().db.collection("clients").add(data);clientId=ref.id;items[ref.id]=[];}
-  for(const [file,field,label] of [[logoFile,"logoUrl","logo"],[coverFile,"coverUrl","capa"]]){
-   if(!file)continue;
-   if(button)button.textContent="Enviando "+label+"...";
-   data[field]=await uploadImageToCloudinary(file,clientId+"/"+field);
+  if(logoFile||coverFile){
+   const storage=FB().storage;
+   if(!storage)throw new Error("O armazenamento de imagens ainda não está conectado. Atualize a página e tente novamente.");
+   for(const [file,field,path] of [[logoFile,"logoUrl","logo"],[coverFile,"coverUrl","cover"]]){
+    if(!file)continue;
+    if(!file.type.startsWith("image/"))throw new Error("Escolha arquivos de imagem.");
+    if(file.size>5*1024*1024)throw new Error("Cada imagem deve ter no máximo 5 MB.");
+    if(button)button.textContent=path==="logo"?"Enviando logo...":"Enviando capa...";
+    const ref=storage.ref("clients/"+clientId+"/"+path+"-"+Date.now()+"-"+file.name.replace(/[^a-zA-Z0-9._-]/g,"_"));
+    const uploaded=await ref.put(file,{contentType:file.type});
+    data[field]=await uploaded.ref.getDownloadURL();
+   }
+   await FB().db.collection("clients").doc(clientId).update({logoUrl:data.logoUrl||clients.find(x=>x.id===clientId)?.logoUrl||"",coverUrl:data.coverUrl||clients.find(x=>x.id===clientId)?.coverUrl||"",updatedAt:firebase.firestore.FieldValue.serverTimestamp()});
   }
-  if(logoFile||coverFile)await FB().db.collection("clients").doc(clientId).update({logoUrl:data.logoUrl||clients.find(x=>x.id===clientId)?.logoUrl||"",coverUrl:data.coverUrl||clients.find(x=>x.id===clientId)?.coverUrl||"",updatedAt:firebase.firestore.FieldValue.serverTimestamp()});
   await loadData();startRealtimeListeners();clientsView();
  }catch(error){
   console.error("CliqueFácil: erro ao salvar página:",error);
@@ -217,7 +212,15 @@ async function submitItem(e,clientId,itemId){
   delete data.photoFile;data.active=form.elements.active.checked;data.updatedAt=firebase.firestore.FieldValue.serverTimestamp();
   const ref=FB().db.collection("clients").doc(clientId).collection("items");let itemRef;
   if(itemId){itemRef=ref.doc(itemId);await itemRef.update(data);}else{data.createdAt=firebase.firestore.FieldValue.serverTimestamp();itemRef=await ref.add(data);}
-  if(photoFile){if(button)button.textContent="Enviando foto...";const imageUrl=await uploadImageToCloudinary(photoFile,clientId+"/items/"+itemRef.id);await itemRef.update({imageUrl});}
+  if(photoFile){
+   if(!photoFile.type.startsWith("image/"))throw new Error("Escolha um arquivo de imagem.");
+   if(photoFile.size>5*1024*1024)throw new Error("A foto deve ter no máximo 5 MB.");
+   const storage=FB().storage;if(!storage)throw new Error("O armazenamento de imagens não está conectado.");
+   if(button)button.textContent="Enviando foto...";
+   const fileRef=storage.ref("clients/"+clientId+"/items/"+itemRef.id+"-"+Date.now()+"-"+photoFile.name.replace(/[^a-zA-Z0-9._-]/g,"_"));
+   const uploaded=await fileRef.put(photoFile,{contentType:photoFile.type});
+   await itemRef.update({imageUrl:await uploaded.ref.getDownloadURL()});
+  }
   await loadData();manageItems(clientId);
  }catch(error){console.error(error);alert("Não foi possível salvar o item.\n"+(error?.message||"Tente novamente."));if(button){button.disabled=false;button.textContent="Salvar item";}}
 }
