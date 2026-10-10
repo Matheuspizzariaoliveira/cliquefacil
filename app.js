@@ -182,7 +182,7 @@ function clientsView(){if(isClientAccount){clientDashboard();return;}view="clien
 function templatesView(){if(isClientAccount){clientDashboard();return;}view="templates";shell(`<section class="hero"><div><h1>Modelos</h1><div class="muted">Estruturas reutilizáveis por segmento.</div></div></section><div class="grid">${templates.map(t=>`<article class="template"><div class="template-icon">${t.icon}</div><h3>${t.name}</h3><p>${t.desc}</p><button class="btn secondary" onclick="newClient('${t.id}')">Usar modelo</button></article>`).join("")}</div>`);}
 async function createClientAccess(clientId){
  const client=clients.find(c=>c.id===clientId);if(!client)return;
- if(client.clientLoginUid){alert("Este cliente já possui um login vinculado.");return;}
+ const existing=await FB().db.collection("clientAccess").where("clientId","==",clientId).limit(1).get();if(!existing.empty){alert("Este cliente já possui um login vinculado.");return;}
  const email=prompt("E-mail para o login do cliente:");if(!email)return;
  const password=prompt("Senha inicial (mínimo 6 caracteres):");if(!password)return;
  if(password.length<6){alert("A senha precisa ter pelo menos 6 caracteres.");return;}
@@ -193,7 +193,7 @@ async function createClientAccess(clientId){
   try{credential=await auth.createUserWithEmailAndPassword(email.trim(),password);}
   finally{if(auth.currentUser)await auth.signOut();}
   await FB().db.collection("clientAccess").doc(credential.user.uid).set({clientId:clientId,createdAt:firebase.firestore.FieldValue.serverTimestamp()});
-  await FB().db.collection("clients").doc(clientId).update({clientLoginUid:credential.user.uid,clientLoginEmail:email.trim(),updatedAt:firebase.firestore.FieldValue.serverTimestamp()});
+  await FB().db.collection("clients").doc(clientId).update({updatedAt:firebase.firestore.FieldValue.serverTimestamp()});
   await loadData();clientsView();alert("Login vinculado à página de "+client.name+". Compartilhe a senha inicial com segurança.");
  }catch(error){console.error(error);alert("Não foi possível criar o acesso: "+firebaseAuthMessage(error));}
 }
