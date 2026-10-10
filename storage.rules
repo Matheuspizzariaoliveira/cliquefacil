@@ -1,0 +1,23 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() {
+      return request.auth != null;
+    }
+    function ownsClient(clientId) {
+      return signedIn()
+        && firestore.get(/databases/(default)/documents/clients/$(clientId)).data.ownerId == request.auth.uid;
+    }
+    function managesClient(clientId) {
+      return signedIn()
+        && firestore.get(/databases/(default)/documents/clientAccess/$(request.auth.uid)).data.clientId == clientId;
+    }
+    match /clients/{clientId}/{allPaths=**} {
+      allow read: if true;
+      allow write: if (ownsClient(clientId) || managesClient(clientId))
+        && request.resource != null
+        && request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+  }
+}
