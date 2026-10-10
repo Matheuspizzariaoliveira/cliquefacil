@@ -1,5 +1,5 @@
 const templates=[{id:"pizzaria",icon:"🍕",name:"Pizzaria / Restaurante",desc:"Cardápio, pedidos e informações."},{id:"barbearia",icon:"💈",name:"Barbearia",desc:"Serviços e agendamento."},{id:"salao",icon:"💇",name:"Salão de beleza",desc:"Serviços, profissionais e horários."},{id:"estetica",icon:"💅",name:"Estética / Manicure",desc:"Catálogo de serviços e agenda."},{id:"loja",icon:"🛍️",name:"Loja",desc:"Produtos, contato e pedidos."},{id:"autonomo",icon:"🧑‍💼",name:"Profissional autônomo",desc:"Serviços e contato."}];
-let clients=[],items={},orders={},appointments={},view="dashboard",currentUser=null;
+let clients=[],items={},orders={},appointments={},view="dashboard",currentUser=null,isClientAccount=false,managedClientId=null;
 let realtimeUnsubscribers=[],realtimeSeen={orders:{},appointments:{}},realtimeInitialized={orders:{},appointments:{}};
 const FB=()=>window.CliqueFacilFirebase||{};
 const esc=v=>String(v??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]));
@@ -26,8 +26,8 @@ async function start(){
   currentUser=user||null;
   if(!user){stopRealtimeListeners();renderLanding();return;}
   stopRealtimeListeners();
-  try{await loadData();dashboard();startRealtimeListeners();}
-  catch(error){console.error(error);alert("Não foi possível carregar os dados do Firebase. Verifique as regras do Firestore.");dashboard();}
+  try{await loadData();if(isClientAccount){clientDashboard();}else{dashboard();startRealtimeListeners();}}
+  catch(error){console.error(error);alert("Não foi possível carregar os dados do Firebase. Verifique as regras do Firestore.");if(isClientAccount)clientDashboard();else dashboard();}
  });
 }
 
@@ -74,14 +74,25 @@ async function register(){const email=prompt("Digite o e-mail que será usado no
 function firebaseAuthMessage(error){const code=error?.code||"";const map={"auth/invalid-email":"E-mail inválido.","auth/user-not-found":"E-mail ou senha incorretos.","auth/wrong-password":"E-mail ou senha incorretos.","auth/invalid-credential":"E-mail ou senha incorretos.","auth/email-already-in-use":"Esse e-mail já está cadastrado.","auth/weak-password":"A senha precisa ter pelo menos 6 caracteres.","auth/too-many-requests":"Muitas tentativas. Tente novamente mais tarde."};return map[code]||error?.message||"Não foi possível entrar.";}
 
 async function loadData(){
- const snap=await FB().db.collection("clients").where("ownerId","==",currentUser.uid).get();
- clients=snap.docs.map(d=>({id:d.id,...d.data()}));items={};orders={};appointments={};
+ isClientAccount=false;managedClientId=null;
+ const access=await FB().db.collection("clientAccess").doc(currentUser.uid).get();
+ if(access.exists){
+  managedClientId=access.data().clientId;isClientAccount=true;
+  const doc=await FB().db.collection("clients").doc(managedClientId).get();
+  if(!doc.exists)throw new Error("A página vinculada a este login não foi encontrada.");
+  clients=[{id:doc.id,...doc.data()}];
+ }else{
+  const snap=await FB().db.collection("clients").where("ownerId","==",currentUser.uid).get();
+  clients=snap.docs.map(d=>({id:d.id,...d.data()}));
+ }
+ items={};orders={};appointments={};
  await Promise.all(clients.map(async c=>{
   const base=FB().db.collection("clients").doc(c.id);
-  const [is,os,aps]=await Promise.all([base.collection("items").get(),base.collection("orders").get(),base.collection("appointments").get()]);
-  items[c.id]=is.docs.map(d=>({id:d.id,...d.data()}));
-  orders[c.id]=os.docs.map(d=>({id:d.id,...d.data()}));
-  appointments[c.id]=aps.docs.map(d=>({id:d.id,...d.data()}));
+  const is=await base.collection("items").get();items[c.id]=is.docs.map(d=>({id:d.id,...d.data()}));
+  if(!isClientAccount){
+   const [os,aps]=await Promise.all([base.collection("orders").get(),base.collection("appointments").get()]);
+   orders[c.id]=os.docs.map(d=>({id:d.id,...d.data()}));appointments[c.id]=aps.docs.map(d=>({id:d.id,...d.data()}));
+  }
  }));
 }
 async function loadPublicSite(slug){
@@ -159,27 +170,35 @@ function startRealtimeListeners(){
   }
  }
 }
+function clientDashboard(){
+ const c=clients.find(x=>x.id===managedClientId);if(!isClientAccount||!c)return;
+ view="client";
+ const app=document.querySelector("#app");
+ app.innerHTML="<header class=\"topbar\"><div class=\"brand\">Clique<span>Fácil</span></div><div class=\"top-actions\"><span>"+esc(currentUser.email||"Conta do cliente")+"</span><button class=\"btn ghost\" onclick=\"logout()\">Sair</button></div></header><main class=\"main\"><section class=\"hero\"><div><div class=\"eyebrow\">Área do cliente</div><h1>Olá, "+esc(c.name)+"!</h1><div class=\"muted\">Edite informações, fotos e catálogo da sua própria página.</div></div></section><section class=\"cards\"><div class=\"card stat-card\"><div class=\"stat-label\">Produtos e serviços</div><div class=\"stat\">"+clientItems(c.id).length+"</div></div></section><section class=\"section-card\"><div class=\"section-head\"><h2>Gerenciar minha página</h2></div><div class=\"section-body\"><button class=\"btn primary\" onclick=\"editClient(\\'"+c.id+"\\')\">Editar informações e fotos</button> <button class=\"btn secondary\" onclick=\"manageItems(\\'"+c.id+"\\')\">Produtos e serviços</button> <button class=\"btn secondary\" onclick=\"publicPage(\\'"+c.id+"\\')\">Visualizar página</button></div></section></main>";
+}
 async function logout(){await FB().auth.signOut();}
 function dashboard(){view='dashboard';const active=clients.filter(c=>c.active).length,totalItems=Object.values(items).reduce((n,a)=>n+a.length,0),totalOrders=Object.values(orders).reduce((n,a)=>n+a.length,0),totalAppointments=Object.values(appointments).reduce((n,a)=>n+a.length,0);const recent=clients.slice(0,5);const recentHtml=recent.length?recent.map(c=>`<div class="client-row"><div class="client-main"><div class="client-avatar">${esc(initials(c.name))}</div><div><strong>${esc(c.name)}</strong><div class="small-muted">${esc(tname(c.template))} · ${clientItems(c.id).length} item(ns)</div></div></div><div class="client-actions"><span class="badge ${c.active?'on':'off'}"><i class="dot"></i>${c.active?'Ativa':'Inativa'}</span><button class="btn ghost" onclick="editClient('${c.id}')">Editar</button></div></div>`).join(''): `<div class="empty"><div class="empty-icon">＋</div><h3>Nenhuma página ainda</h3><p class="muted">Comece criando a primeira página do seu cliente.</p><button class="btn primary" onclick="newClient()">Criar primeira página</button></div>`;shell(`<section class="hero"><div><div class="eyebrow">Painel de controle</div><h1>Visão geral</h1><div class="muted">Gerencie sua operação digital de forma simples e profissional.</div></div><button class="btn primary" onclick="newClient()">+ Criar nova página</button></section><section class="cards"><div class="card stat-card"><div class="stat-icon">👥</div><div class="stat-label">Clientes</div><div class="stat">${clients.length}</div><div class="stat-sub">cadastros no painel</div></div><div class="card stat-card"><div class="stat-icon">✓</div><div class="stat-label">Páginas ativas</div><div class="stat">${active}</div><div class="stat-sub">${clients.length?Math.round(active/clients.length*100):0}% dos clientes</div></div><div class="card stat-card"><div class="stat-icon">◇</div><div class="stat-label">Modelos</div><div class="stat">${templates.length}</div><div class="stat-sub">segmentos disponíveis</div></div><div class="card stat-card"><div class="stat-icon">▤</div><div class="stat-label">Itens</div><div class="stat">${totalItems}</div><div class="stat-sub">produtos e serviços</div></div><div class="card stat-card"><div class="stat-icon">🧾</div><div class="stat-label">Pedidos</div><div class="stat">${totalOrders}</div><div class="stat-sub">solicitações registradas</div></div><div class="card stat-card"><div class="stat-icon">📅</div><div class="stat-label">Agendamentos</div><div class="stat">${totalAppointments}</div><div class="stat-sub">solicitações recebidas</div></div></section><div class="dashboard-grid"><section class="section-card"><div class="section-head"><h2>Páginas recentes</h2><button class="btn ghost" onclick="clientsView()">Ver todas</button></div><div class="section-body">${recentHtml}</div></section><section class="section-card"><div class="section-head"><h2>Ações rápidas</h2></div><div class="section-body"><div class="quick-grid"><button class="quick-card" onclick="newClient()"><div class="quick-icon">＋</div><div><strong>Criar página</strong><span>Comece um novo cliente</span></div></button><button class="quick-card" onclick="templatesView()"><div class="quick-icon">◇</div><div><strong>Explorar modelos</strong><span>Escolha um segmento</span></div></button><button class="quick-card" onclick="clientsView()"><div class="quick-icon">◉</div><div><strong>Gerenciar clientes</strong><span>Editar e visualizar páginas</span></div></button></div></div></section></div>`);}
-function clientsView(){view="clients";const rows=clients.map(c=>`<tr><td><strong>${esc(c.name)}</strong><div class="small-muted">/${esc(c.slug||"")}</div></td><td>${tname(c.template)}</td><td><span class="badge ${c.active?"on":"off"}">${c.active?"Ativa":"Inativa"}</span></td><td>${clientItems(c.id).length}</td><td><button class="btn ghost" onclick="editClient('${c.id}')">Editar</button> <button class="btn secondary" onclick="manageItems('${c.id}')">Catálogo</button> <button class="btn primary" onclick="publicPage('${c.id}')">Abrir</button> <button class="btn secondary" onclick="createClientAccess('${c.id}')">Acesso do cliente</button></td></tr>`).join("");shell(`<section class="hero"><div><h1>Clientes</h1><div class="muted">Cada cliente possui página, slug e catálogo próprios.</div></div><button class="btn primary" onclick="newClient()">+ Nova página</button></section>${clients.length?`<div class="table-wrap"><table class="table"><thead><tr><th>Cliente</th><th>Segmento</th><th>Status</th><th>Itens</th><th>Ações</th></tr></thead><tbody>${rows}</tbody></table></div>`:`<div class="card empty">Nenhum cliente cadastrado.</div>`}`);}
-function templatesView(){view="templates";shell(`<section class="hero"><div><h1>Modelos</h1><div class="muted">Estruturas reutilizáveis por segmento.</div></div></section><div class="grid">${templates.map(t=>`<article class="template"><div class="template-icon">${t.icon}</div><h3>${t.name}</h3><p>${t.desc}</p><button class="btn secondary" onclick="newClient('${t.id}')">Usar modelo</button></article>`).join("")}</div>`);}
+function clientsView(){if(isClientAccount){clientDashboard();return;}view="clients";const rows=clients.map(c=>`<tr><td><strong>${esc(c.name)}</strong><div class="small-muted">/${esc(c.slug||"")}</div></td><td>${tname(c.template)}</td><td><span class="badge ${c.active?"on":"off"}">${c.active?"Ativa":"Inativa"}</span></td><td>${clientItems(c.id).length}</td><td><button class="btn ghost" onclick="editClient('${c.id}')">Editar</button> <button class="btn secondary" onclick="manageItems('${c.id}')">Catálogo</button> <button class="btn primary" onclick="publicPage('${c.id}')">Abrir</button> <button class="btn secondary" onclick="createClientAccess('${c.id}')">Acesso do cliente</button></td></tr>`).join("");shell(`<section class="hero"><div><h1>Clientes</h1><div class="muted">Cada cliente possui página, slug e catálogo próprios.</div></div><button class="btn primary" onclick="newClient()">+ Nova página</button></section>${clients.length?`<div class="table-wrap"><table class="table"><thead><tr><th>Cliente</th><th>Segmento</th><th>Status</th><th>Itens</th><th>Ações</th></tr></thead><tbody>${rows}</tbody></table></div>`:`<div class="card empty">Nenhum cliente cadastrado.</div>`}`);}
+function templatesView(){if(isClientAccount){clientDashboard();return;}view="templates";shell(`<section class="hero"><div><h1>Modelos</h1><div class="muted">Estruturas reutilizáveis por segmento.</div></div></section><div class="grid">${templates.map(t=>`<article class="template"><div class="template-icon">${t.icon}</div><h3>${t.name}</h3><p>${t.desc}</p><button class="btn secondary" onclick="newClient('${t.id}')">Usar modelo</button></article>`).join("")}</div>`);}
 async function createClientAccess(clientId){
- const email=prompt('E-mail para o login do cliente:');if(!email)return;
- const password=prompt('Senha inicial (mínimo 6 caracteres):');if(!password)return;
- if(password.length<6){alert('A senha precisa ter pelo menos 6 caracteres.');return;}
+ const client=clients.find(c=>c.id===clientId);if(!client)return;
+ if(client.clientLoginUid){alert("Este cliente já possui um login vinculado.");return;}
+ const email=prompt("E-mail para o login do cliente:");if(!email)return;
+ const password=prompt("Senha inicial (mínimo 6 caracteres):");if(!password)return;
+ if(password.length<6){alert("A senha precisa ter pelo menos 6 caracteres.");return;}
  try{
-  const existing=await FB().db.collection('clientAccess').where('clientId','==',clientId).limit(1).get();
-  if(!existing.empty){alert('Este cliente já possui acesso.');return;}
-  let secondary=firebase.apps.find(x=>x.name==='CliqueFacilSecondary');
-  if(!secondary)secondary=firebase.initializeApp(window.firebaseConfig,'CliqueFacilSecondary');
+  let secondary=firebase.apps.find(x=>x.name==="CliqueFacilSecondary");
+  if(!secondary)secondary=firebase.initializeApp(window.firebaseConfig,"CliqueFacilSecondary");
   const auth=secondary.auth();let credential;
-  try{credential=await auth.createUserWithEmailAndPassword(email.trim(),password);}finally{if(auth.currentUser)await auth.signOut();}
-  await FB().db.collection('clientAccess').doc(credential.user.uid).set({clientId:clientId,createdAt:firebase.firestore.FieldValue.serverTimestamp()});
-  alert('Acesso criado para '+email.trim()+'. Compartilhe a senha inicial com segurança.');
- }catch(error){console.error(error);alert('Não foi possível criar o acesso: '+firebaseAuthMessage(error));}
+  try{credential=await auth.createUserWithEmailAndPassword(email.trim(),password);}
+  finally{if(auth.currentUser)await auth.signOut();}
+  await FB().db.collection("clientAccess").doc(credential.user.uid).set({clientId:clientId,createdAt:firebase.firestore.FieldValue.serverTimestamp()});
+  await FB().db.collection("clients").doc(clientId).update({clientLoginUid:credential.user.uid,clientLoginEmail:email.trim(),updatedAt:firebase.firestore.FieldValue.serverTimestamp()});
+  await loadData();clientsView();alert("Login vinculado à página de "+client.name+". Compartilhe a senha inicial com segurança.");
+ }catch(error){console.error(error);alert("Não foi possível criar o acesso: "+firebaseAuthMessage(error));}
 }
-function newClient(template="pizzaria"){view="form";formView({template});}
-function editClient(id){const c=clients.find(x=>x.id===id);if(c){view="form";formView(c);}}
+function newClient(template="pizzaria"){if(isClientAccount){clientDashboard();return;}view="form";formView({template});}
+function editClient(id){if(isClientAccount&&id!==managedClientId){clientDashboard();return;}const c=clients.find(x=>x.id===id);if(c){view="form";formView(c);}}
 function formView(data={}){const c={name:"",description:"",phone:"",instagram:"",address:"",hours:"",accent:"#5b5cf0",template:data.template||"pizzaria",active:true,buttonText:"Falar no WhatsApp",welcomeText:"Bem-vindo! Confira nossos produtos e serviços.",...data};shell(`<section class="hero"><div><div class="eyebrow">${data.id?"Editor de página":"Configuração inicial"}</div><h1>${data.id?"Editar página":"Nova página"}</h1><div class="muted">Personalize a experiência pública do seu cliente sem alterar código.</div></div><div class="hero-actions">${data.id?`<button class="btn secondary" type="button" onclick="publicPage('${c.id}')">Ver página</button>`:""}</div></section><form class="form" onsubmit="submitClient(event,'${c.id||""}')"><div class="form-section"><h3>Identidade do negócio</h3><p class="form-note">Essas informações aparecem no topo da página pública.</p><div class="form-grid"><div class="field"><label>Nome da empresa</label><input name="name" required value="${esc(c.name)}" placeholder="Ex.: Pizzaria Oliveira"></div><div class="field"><label>Segmento</label><select name="template">${templates.map(t=>`<option value="${t.id}" ${c.template===t.id?"selected":""}>${t.icon} ${t.name}</option>`).join("")}</select></div><div class="field full"><label>Descrição curta</label><textarea name="description" placeholder="Explique em poucas palavras o que sua empresa oferece.">${esc(c.description)}</textarea></div><div class="field full"><label>Mensagem de boas-vindas</label><input name="welcomeText" value="${esc(c.welcomeText)}" placeholder="Bem-vindo!"></div></div></div><div class="form-section"><h3>Contato e localização</h3><p class="form-note">Facilite o contato e ajude o cliente final a encontrar o negócio.</p><div class="form-grid"><div class="field"><label>WhatsApp</label><input name="phone" value="${esc(c.phone)}" placeholder="5512991119914"></div><div class="field"><label>Instagram</label><input name="instagram" value="${esc(c.instagram)}" placeholder="@empresa"></div><div class="field full"><label>Endereço</label><input name="address" value="${esc(c.address)}" placeholder="Rua, número, bairro, cidade - UF"></div><div class="field full"><label>Horário de funcionamento</label><input name="hours" value="${esc(c.hours)}" placeholder="Seg a Sex: 09h às 18h"></div></div></div><div class="form-section"><h3>Fotos e identidade visual</h3><p class="form-note">Envie imagens diretamente da galeria do celular. Recomendado: JPG, PNG ou WebP de até 5 MB.</p><div class="form-grid"><div class="field"><label>Logo do negócio</label><input type="file" name="logoFile" accept="image/*">${c.logoUrl?`<img class="upload-preview" src="${esc(c.logoUrl)}" alt="Logo atual">`:""}<small>Escolha uma imagem da galeria ou tire uma foto.</small></div><div class="field"><label>Foto de capa</label><input type="file" name="coverFile" accept="image/*">${c.coverUrl?`<img class="upload-preview cover-upload-preview" src="${esc(c.coverUrl)}" alt="Capa atual">`:""}<small>Uma foto grande para destacar a página.</small></div></div></div><div class="form-section"><h3>Aparência e chamada para ação</h3><p class="form-note">Escolha as cores e o estilo que combinam com o negócio.</p><div class="form-grid"><div class="field"><label>Cor principal</label><input type="color" name="accent" value="${esc(c.accent)}"></div><div class="field"><label>Estilo da página</label><select name="layout"><option value="moderno" ${(c.layout||"moderno")==="moderno"?"selected":""}>Moderno — cartões</option><option value="elegante" ${c.layout==="elegante"?"selected":""}>Elegante — visual refinado</option><option value="compacto" ${c.layout==="compacto"?"selected":""}>Compacto — direto ao ponto</option></select></div><div class="field full"><label>Texto do botão principal</label><input name="buttonText" value="${esc(c.buttonText)}" placeholder="Falar no WhatsApp"></div></div></div><div class="actions"><button type="button" class="btn ghost" onclick="clientsView()">Cancelar</button><button type="submit" class="btn primary">${data.id?"Salvar alterações":"Criar página"}</button></div></form>`);}
 function uniqueSlug(name,id){const base=slugify(name)||"pagina";let slug=base,n=2;const used=new Set(clients.filter(c=>c.id!==id).map(c=>String(c.slug||"").toLowerCase()).filter(Boolean));while(used.has(slug.toLowerCase()))slug=base+"-"+n++;return slug;}
 async function submitClient(e,id){
@@ -341,12 +360,14 @@ async function submitPublicAppointment(e,clientId){
 function orderStatusLabel(status){return ({novo:"Novo",confirmado:"Confirmado",preparando:"Em andamento",concluido:"Concluído",cancelado:"Cancelado"})[status]||"Novo";}
 function appointmentStatusLabel(status){return ({novo:"Novo",confirmado:"Confirmado",concluido:"Concluído",cancelado:"Cancelado"})[status]||"Novo";}
 function ordersView(){
+ if(isClientAccount){clientDashboard();return;}
  view="orders";
  const rows=clients.flatMap(c=>(orders[c.id]||[]).map(o=>({...o,clientName:c.name,clientId:c.id}))).sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
  const content=rows.length?`<div class="table-wrap"><table class="table"><thead><tr><th>Pedido</th><th>Cliente da página</th><th>Valor</th><th>Data</th><th>Status</th></tr></thead><tbody>${rows.map(o=>`<tr><td><strong>${esc(o.itemName||"Pedido")}</strong><div class="small-muted">Qtd.: ${Number(o.quantity)||1}</div></td><td>${esc(o.clientName)}</td><td>${o.price?"R$ "+esc(o.price):"Consultar"}</td><td>${esc(formatDate(o.createdAt))}</td><td><select class="status-select" aria-label="Status do pedido" onchange="updateRecordStatus('${o.clientId}','orders','${o.id}',this.value)">${["novo","confirmado","preparando","concluido","cancelado"].map(v=>`<option value="${v}" ${(o.status||"novo")===v?"selected":""}>${orderStatusLabel(v)}</option>`).join("")}</select></td></tr>`).join("")}</tbody></table></div>`:`<div class="card empty"><h3>Nenhum pedido registrado</h3><p class="muted">Quando alguém clicar em Pedir em um produto da página pública, a solicitação aparecerá aqui.</p></div>`;
  shell(`<section class="hero"><div><h1>Pedidos</h1><div class="muted">Acompanhe pedidos de todas as páginas em um só lugar.</div></div><button class="btn secondary" onclick="loadAndRefresh()">Atualizar</button></section><div class="record-summary"><strong>${rows.length}</strong><span>pedido(s) registrados</span></div>${content}`);
 }
 function appointmentsView(){
+ if(isClientAccount){clientDashboard();return;}
  view="appointments";
  const rows=clients.flatMap(c=>(appointments[c.id]||[]).map(a=>({...a,clientName:c.name,clientId:c.id}))).sort((a,b)=>(String(a.date||"")+String(a.time||"")).localeCompare(String(b.date||"")+String(b.time||"")));
  const content=rows.length?`<div class="table-wrap"><table class="table"><thead><tr><th>Solicitante</th><th>Negócio</th><th>Serviço</th><th>Data e hora</th><th>Contato</th><th>Status</th></tr></thead><tbody>${rows.map(a=>`<tr><td><strong>${esc(a.customerName||"Cliente")}</strong>${a.notes?`<div class="small-muted">${esc(a.notes)}</div>`:""}</td><td>${esc(a.clientName)}</td><td>${esc(a.service||"—")}</td><td>${esc(a.date||"—")} ${esc(a.time||"")}</td><td>${esc(a.customerPhone||"—")}</td><td><select class="status-select" aria-label="Status do agendamento" onchange="updateRecordStatus('${a.clientId}','appointments','${a.id}',this.value)">${["novo","confirmado","concluido","cancelado"].map(v=>`<option value="${v}" ${(a.status||"novo")===v?"selected":""}>${appointmentStatusLabel(v)}</option>`).join("")}</select></td></tr>`).join("")}</tbody></table></div>`:`<div class="card empty"><h3>Nenhum agendamento recebido</h3><p class="muted">As solicitações feitas na página pública aparecerão aqui.</p></div>`;
