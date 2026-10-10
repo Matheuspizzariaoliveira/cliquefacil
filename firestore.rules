@@ -6,7 +6,7 @@ service cloud.firestore {
   function managesClient(clientId){return signedIn() && get(/databases/$(database)/documents/clientAccess/$(request.auth.uid)).data.clientId == clientId;}
   function canManageCatalog(clientId){return ownsClient(clientId) || managesClient(clientId);}
   match /clientAccess/{uid} {
-   allow read: if signedIn() && request.auth.uid == uid;
+   allow read: if signedIn() && (request.auth.uid == uid || ownsClient(resource.data.clientId));
    allow create: if signedIn() && request.resource.data.clientId is string && ownsClient(request.resource.data.clientId);
    allow update: if signedIn() && ownsClient(resource.data.clientId) && request.resource.data.clientId == resource.data.clientId;
    allow delete: if signedIn() && ownsClient(resource.data.clientId);
